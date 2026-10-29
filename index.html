@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Network Identifiability Lab</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=STIX+Two+Text:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+:root{
+  --paper:#FBFBF8; --ink:#1B2A41; --faint:#5A6678; --rule:#D8DCE3;
+  --canvas:#F4F5F2; --grid:#E3E6E0;
+  --excite:#2E7D4F; --excite-soft:#DDEEE4;
+  --measure:#C04657; --measure-soft:#F4DEE1;
+  --unknown:#2B5FB8; --known:#8A94A4;
+  --verdict-bg:#F1F3EE; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --serif:"STIX Two Text",Georgia,"Times New Roman",serif;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#151922; --ink:#E7EAF1; --faint:#9AA3B2; --rule:#333A47;
+    --canvas:#1B2029; --grid:#242B36;
+    --excite:#4CAF79; --excite-soft:#1E3328;
+    --measure:#E0697A; --measure-soft:#3A2228;
+    --unknown:#6D9BE8; --known:#6F7989;
+    --verdict-bg:#1C222D;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#151922; --ink:#E7EAF1; --faint:#9AA3B2; --rule:#333A47;
+  --canvas:#1B2029; --grid:#242B36;
+  --excite:#4CAF79; --excite-soft:#1E3328;
+  --measure:#E0697A; --measure-soft:#3A2228;
+  --unknown:#6D9BE8; --known:#6F7989;
+  --verdict-bg:#1C222D;
+  color-scheme:dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.55 var(--sans)}
+header{padding:20px 22px 6px;max-width:1180px;margin:0 auto}
+h1{font-family:var(--serif);font-weight:600;font-size:1.65rem;margin:0}
+.sub{color:var(--faint);margin:.3rem 0 0;font-size:.95rem;max-width:62ch}
+main{max-width:1180px;margin:0 auto;padding:14px 22px 48px;display:grid;grid-template-columns:minmax(0,7fr) minmax(300px,5fr);gap:20px}
+@media (max-width:900px){main{grid-template-columns:1fr}}
+section h2{font-family:var(--serif);font-weight:600;font-size:1.12rem;margin:0 0 .5rem}
+.panel{border:1px solid var(--rule);border-radius:10px;background:var(--paper);padding:14px 16px;margin-bottom:16px}
+#stage{background:var(--canvas);border:1px solid var(--rule);border-radius:10px;position:relative;overflow:hidden}
+#net{display:block;width:100%;height:auto;touch-action:none;
+ background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+ background-size:26px 26px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0 0}
+button{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--faint)}
+button:focus-visible{outline:2px solid var(--unknown);outline-offset:2px}
+button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink);font-weight:600}
+button.primary:hover{opacity:.92}
+button[aria-pressed="true"]{background:var(--unknown);border-color:var(--unknown);color:#fff}
+select,input[type=text]{font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--rule);border-radius:8px;padding:6px 8px}
+.hint{color:var(--faint);font-size:.88rem;margin:.45rem 0 0}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:.88rem;color:var(--faint);margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.dot{width:12px;height:12px;border-radius:50%;display:inline-block;border:1.5px solid var(--faint)}
+.dot.exc{background:var(--excite-soft);border-color:var(--excite)}
+.dot.mea{background:var(--measure-soft);border-color:var(--measure)}
+.sw{width:18px;height:0;border-top:2.5px solid var(--unknown);display:inline-block}
+.sw.known{border-top-color:var(--known);border-top-style:dashed}
+table{border-collapse:collapse;width:100%;font-size:.92rem}
+td,th{text-align:left;padding:4px 8px 4px 0;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-weight:600;color:var(--faint)}
+td.num,span.m{font-family:var(--mono);font-size:.88em}
+.steps{counter-reset:st;list-style:none;margin:0;padding:0}
+.steps>li{counter-increment:st;border-top:1px solid var(--rule);padding:12px 0}
+.steps>li:first-child{border-top:0;padding-top:2px}
+.steps>li::before{content:counter(st) ".";font-family:var(--serif);font-weight:600;margin-right:.5ch}
+.steps b.t{font-family:var(--serif)}
+.verdict{background:var(--verdict-bg);border:1px solid var(--rule);border-left:4px solid var(--ink);border-radius:8px;padding:12px 14px;margin-top:10px}
+.verdict .head{font-family:var(--serif);font-style:italic}
+.ok{color:var(--excite);font-weight:600}
+.bad{color:var(--measure);font-weight:600}
+.tag{display:inline-block;border:1px solid var(--rule);border-radius:999px;padding:1px 9px;font-size:.82rem;color:var(--faint);margin-left:6px}
+.rep button{padding:3px 9px;font-size:.85rem;margin-left:6px}
+#edgeForm{display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+#edgeForm.show{display:flex}
+.small{font-size:.88rem;color:var(--faint)}
+a{color:var(--unknown)}
+@media (prefers-reduced-motion:no-preference){
+  .verdict{animation:in .25s ease-out}
+  @keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1}}
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Network Identifiability Lab</h1>
+  <p class="sub">Build a dynamic network, choose which nodes are excited and measured, and test whether the unknown modules are generically identifiable — locally, globally, and with what identifiability degree <span class="m">d</span>.</p>
+</header>
+<main>
+<div>
+  <div id="stage"><svg id="net" viewBox="0 0 640 430" role="img" aria-label="Network diagram"></svg></div>
+  <div class="toolbar">
+    <select id="preset" aria-label="Load preset">
+      <option value="paper">Paper example (d = 2)</option>
+      <option value="chain">Chain 1→2→3 (d = 1)</option>
+      <option value="tri">Triangle, all unknown</option>
+      <option value="empty">Empty</option>
+    </select>
+    <button id="addNode">Add node</button>
+    <button id="edgeMode" aria-pressed="false">Add edge: click tail, then head</button>
+    <button id="delMode" aria-pressed="false">Delete</button>
+    <span class="small" id="modeMsg"></span>
+  </div>
+  <form id="edgeForm">
+    <span>New edge <b id="efLabel"></b>:</span>
+    <label><input type="radio" name="ek" value="unknown" checked> unknown module</label>
+    <label><input type="radio" name="ek" value="known"> known, value <input id="efVal" type="text" size="4" value="1" inputmode="decimal"></label>
+    <button type="submit" class="primary">Add</button>
+    <button type="button" id="efCancel">Cancel</button>
+  </form>
+  <p class="hint">Click a node to cycle its signals: none → excited → measured → excited + measured. Drag to rearrange.</p>
+  <div class="legend">
+    <span><span class="dot exc"></span>excited</span>
+    <span><span class="dot mea"></span>measured</span>
+    <span><span class="sw"></span>unknown module</span>
+    <span><span class="sw known"></span>known module</span>
+  </div>
+  <div class="panel" style="margin-top:16px">
+    <h2>Edges</h2>
+    <div id="edgeList" class="small">No edges yet.</div>
+  </div>
+  <div class="panel">
+    <h2>Define by text</h2>
+    <p class="small" style="margin:.2rem 0 .5rem">One edge per line, <span class="m">tail -&gt; head</span> for an unknown module or <span class="m">tail -&gt; head : value</span> for a known one, then <span class="m">excite:</span> and <span class="m">measure:</span> lines. Lines starting with <span class="m">#</span> are ignored.</p>
+    <textarea id="txt" rows="8" spellcheck="false" style="width:100%;font-family:var(--mono);font-size:.85rem;color:var(--ink);background:var(--canvas);border:1px solid var(--rule);border-radius:8px;padding:8px"></textarea>
+    <div class="toolbar">
+      <button id="loadTxt" class="primary">Load network from text</button>
+      <button id="dumpTxt">Copy current network to text</button>
+      <span class="small" id="txtMsg" role="status"></span>
+    </div>
+  </div>
+</div>
+
+<div>
+  <div class="panel">
+    <button id="run" class="primary" style="width:100%;padding:10px">Run identifiability analysis</button>
+    <p class="hint" id="counts"></p>
+  </div>
+  <div class="panel" id="results" hidden>
+    <h2>Analysis</h2>
+    <ol class="steps" id="stepsOut"></ol>
+    <div class="verdict" id="verdict" hidden></div>
+    <div id="repairs"></div>
+    <p class="hint">The rank test holds with probability one at a random point; the degree is found by multistart Newton on <span class="m">h(θ) = h(θ*)</span>, so the reported <span class="m">d</span> is a numerical count — a certificate needs the exact methods in the paper. Fiber points with any |coordinate| &gt; 10⁶ are treated as spurious.</p>
+  </div>
+</div>
+</main>
+<script>
+"use strict";
+/* ---------- complex arithmetic on [re,im] ---------- */
+const C=(re,im=0)=>[re,im];
+const cadd=(a,b)=>[a[0]+b[0],a[1]+b[1]], csub=(a,b)=>[a[0]-b[0],a[1]-b[1]];
+const cmul=(a,b)=>[a[0]*b[0]-a[1]*b[1],a[0]*b[1]+a[1]*b[0]];
+const cdiv=(a,b)=>{const d=b[0]*b[0]+b[1]*b[1];return[(a[0]*b[0]+a[1]*b[1])/d,(a[1]*b[0]-a[0]*b[1])/d]};
+const cabs=a=>Math.hypot(a[0],a[1]), conj=a=>[a[0],-a[1]];
+const zeros=(r,c)=>Array.from({length:r},()=>Array.from({length:c},()=>C(0)));
+function luSolve(A,B){ // A n×n, B n×m complex; returns X or null (singular); also det in X.det
+  const n=A.length,m=B[0].length;
+  const M=A.map(r=>r.map(x=>x.slice())),X=B.map(r=>r.map(x=>x.slice()));
+  let det=C(1);
+  for(let k=0;k<n;k++){
+    let p=k,best=cabs(M[k][k]);
+    for(let i=k+1;i<n;i++){const v=cabs(M[i][k]);if(v>best){best=v;p=i}}
+    if(best<1e-13)return null;
+    if(p!==k){[M[p],M[k]]=[M[k],M[p]];[X[p],X[k]]=[X[k],X[p]];det=cmul(det,C(-1))}
+    det=cmul(det,M[k][k]);
+    for(let i=k+1;i<n;i++){
+      const f=cdiv(M[i][k],M[k][k]);
+      for(let j=k;j<n;j++)M[i][j]=csub(M[i][j],cmul(f,M[k][j]));
+      for(let j=0;j<m;j++)X[i][j]=csub(X[i][j],cmul(f,X[k][j]));
+    }
+  }
+  for(let k=n-1;k>=0;k--){
+    for(let j=0;j<m;j++){
+      let s=X[k][j];
+      for(let i=k+1;i<n;i++)s=csub(s,cmul(M[k][i],X[i][j]));
+      X[k][j]=cdiv(s,M[k][k]);
+    }
+  }
+  X.det=det;return X;
+}
+/* ---------- model ---------- */
+let nodes=[],edges=[],nextId=1; // node:{id,name,x,y,exc,mea} edge:{t,h,kind,val}
+const S=()=>({nodes,edges,nextId});
+function save(){try{localStorage.setItem("idlab",JSON.stringify(S()))}catch(e){}}
+function excited(){return nodes.filter(n=>n.exc)}
+function measured(){return nodes.filter(n=>n.mea)}
+function unknownEdges(){return edges.filter(e=>e.kind==="unknown")}
+function buildG(th){ // th: array of complex, per unknown edge order
+  const n=nodes.length,idx=new Map(nodes.map((nd,i)=>[nd.id,i]));
+  const G=zeros(n,n);let u=0;
+  for(const e of edges){
+    const i=idx.get(e.t),j=idx.get(e.h);
+    G[j][i]=e.kind==="known"?C(e.val):th[u++].slice();
+  }
+  return {G,idx};
+}
+function evalAll(th){ // returns {h, M=(I-G)^{-1}, X=M B, det} or null
+  const n=nodes.length,{G}=buildG(th);
+  const A=zeros(n,n);
+  for(let i=0;i<n;i++)for(let j=0;j<n;j++)A[i][j]=i===j?csub(C(1),G[i][j]):csub(C(0),G[i][j]);
+  const I=zeros(n,n);for(let i=0;i<n;i++)I[i][i]=C(1);
+  const M=luSolve(A,I);if(!M)return null;
+  const exc=excited().map(nd=>nodes.indexOf(nd)),mea=measured().map(nd=>nodes.indexOf(nd));
+  const X=mea.length&&exc.length?null:null;
+  const Xfull=exc.map(c=>M.map(r=>r[c])); // columns: Xfull[r][i] = M[i][col r]
+  const h=[];
+  for(const r in exc)for(const c of mea)h.push(M[c][exc[r]]);
+  return {h,M,det:M.det,excIdx:exc,meaIdx:mea};
+}
+function jacobian(th){ // analytic: d h / d θ_e ; returns {J (p×m complex), h}
+  const ev=evalAll(th);if(!ev)return null;
+  const n=nodes.length,{M,excIdx,meaIdx}=ev,idx=new Map(nodes.map((nd,i)=>[nd.id,i]));
+  const ue=unknownEdges(),m=ue.length,p=excIdx.length*meaIdx.length;
+  const J=zeros(p,m);
+  ue.forEach((e,u)=>{
+    const i=idx.get(e.t),j=idx.get(e.h);
+    // dM = M E_{j,i} M ; dh_{(r,c)} = M[c][j]*M[i][exc_r]
+    let q=0;
+    for(const er of excIdx)for(const c of meaIdx)J[q++][u]=cmul(M[c][j],M[i][er]);
+  });
+  return {J,h:ev.h,det:ev.det};
+}
+/* ---------- numerics ---------- */
+function numRank(Jr){ // real matrix rank via Jacobi eigen of J^T J
+  const p=Jr.length,m=p?Jr[0].length:0;if(!m)return 0;
+  const A=Array.from({length:m},(_,i)=>Array.from({length:m},(_,j)=>{let s=0;for(let k=0;k<p;k++)s+=Jr[k][i]*Jr[k][j];return s}));
+  for(let sweep=0;sweep<60;sweep++){
+    let off=0;
+    for(let i=0;i<m;i++)for(let j=i+1;j<m;j++)off+=A[i][j]*A[i][j];
+    if(off<1e-24)break;
+    for(let i=0;i<m;i++)for(let j=i+1;j<m;j++){
+      if(Math.abs(A[i][j])<1e-18)continue;
+      const t=(A[j][j]-A[i][i])/(2*A[i][j]),s=Math.sign(t)/(Math.abs(t)+Math.sqrt(1+t*t)),c=1/Math.sqrt(1+s*s),sn=s*c;
+      for(let k=0;k<m;k++){const a=A[i][k],b=A[j][k];A[i][k]=c*a-sn*b;A[j][k]=sn*a+c*b}
+      for(let k=0;k<m;k++){const a=A[k][i],b=A[k][j];A[k][i]=c*a-sn*b;A[k][j]=sn*a+c*b}
+    }
+  }
+  const ev=A.map((r,i)=>Math.max(A[i][i],0)).sort((a,b)=>b-a);
+  const tol=Math.max(1e-10,(ev[0]||0)*1e-10);
+  return ev.filter(v=>v>tol).length;
+}
+function rankTest(){ // max over 3 random real points
+  const m=unknownEdges().length;let best=0;
+  for(let t=0;t<3;t++){
+    const th=Array.from({length:m},()=>C((Math.random()*4-2)||.37));
+    const jj=jacobian(th);if(!jj)continue;
+    const p=jj.J.length;
+    const Jr=[];
+    for(let i=0;i<p;i++){Jr.push(jj.J[i].map(z=>z[0]));Jr.push(jj.J[i].map(z=>z[1]))}
+    best=Math.max(best,numRank(Jr));
+  }
+  return best;
+}
+function gaussNewton(th0,yst){ // solve h(θ)=yst from start th0; returns θ or null
+  let th=th0.map(z=>z.slice());const m=th.length;
+  for(let it=0;it<60;it++){
+    const jj=jacobian(th);if(!jj)return null;
+    const r=jj.h.map((z,i)=>csub(z,yst[i]));
+    let nr=0;for(const z of r)nr+=z[0]*z[0]+z[1]*z[1];nr=Math.sqrt(nr);
+    if(nr<1e-11)return th;
+    // normal equations (J^H J + λI) dx = -J^H r
+    const p=r.length,A=zeros(m,m),b=zeros(m,1);
+    for(let i=0;i<m;i++)for(let j=0;j<m;j++){let s=C(0);for(let k=0;k<p;k++)s=cadd(s,cmul(conj(jj.J[k][i]),jj.J[k][j]));A[i][j]=s}
+    for(let i=0;i<m;i++){let s=C(0);for(let k=0;k<p;k++)s=cadd(s,cmul(conj(jj.J[k][i]),r[k]));b[i][0]=csub(C(0),s)}
+    const lam=Math.min(1e-3,nr*1e-3);
+    for(let i=0;i<m;i++)A[i][i]=cadd(A[i][i],C(lam));
+    const dx=luSolve(A,b);if(!dx)return null;
+    let step=1;
+    for(let ls=0;ls<8;ls++){
+      const cand=th.map((z,i)=>cadd(z,cmul(C(step),dx[i][0])));
+      const e2=evalAll(cand);
+      if(e2){let n2=0;for(let i=0;i<e2.h.length;i++){const d=csub(e2.h[i],yst[i]);n2+=d[0]*d[0]+d[1]*d[1]}
+        if(Math.sqrt(n2)<nr){th=cand;break}}
+      step/=2;if(ls===7)return null;
+    }
+  }
+  const jj=jacobian(th);if(!jj)return null;
+  let nr=0;for(let i=0;i<jj.h.length;i++){const d=csub(jj.h[i],yst[i]);nr+=d[0]*d[0]+d[1]*d[1]}
+  return Math.sqrt(nr)<1e-9?th:null;
+}
+function computeFiber(){
+  const m=unknownEdges().length;
+  const prim=[3,5,7,11,13,17,19,23,29,31,37,41];
+  const thStar=Array.from({length:m},(_,i)=>C((prim[i%12]/7)*(i%2?-1:1)+0.11*i));
+  const e0=evalAll(thStar);if(!e0)return null;
+  const yst=e0.h;
+  const found=[thStar];
+  const scales=[.4,1,2.5];
+  const tries=Math.min(420,120*m+120);
+  for(let t=0;t<tries;t++){
+    const sc=scales[t%3];
+    const st=thStar.map(z=>C(z[0]+sc*gauss(),z[1]+sc*gauss()));
+    const sol=gaussNewton(st,yst);
+    if(!sol)continue;
+    if(sol.some(z=>cabs(z)>1e6))continue;
+    if(!found.some(f=>dist(f,sol)<1e-5*(1+norm(sol))))found.push(sol);
+  }
+  return {thStar,yst,fiber:found};
+}
+const gauss=()=>{let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)};
+const dist=(a,b)=>Math.sqrt(a.reduce((s,z,i)=>s+(z[0]-b[i][0])**2+(z[1]-b[i][1])**2,0));
+const norm=a=>Math.sqrt(a.reduce((s,z)=>s+z[0]*z[0]+z[1]*z[1],0));
+function fmtC(z){
+  const r=Math.abs(z[0])<5e-7?0:z[0],i=Math.abs(z[1])<5e-7?0:z[1];
+  const f=x=>{const v=Math.round(x*10000)/10000;return String(v)};
+  if(!i)return f(r);
+  return (r?f(r):"")+(i>0?(r?" + ":"")+f(i)+"i":" \u2212 "+f(-i)+"i");
+}
+/* ---------- separating analysis ---------- */
+function separations(fiber){
+  const reps=[];
+  const resp=fiber.map(th=>evalAll(th));
+  const n=nodes.length;
+  nodes.forEach((nd,vi)=>{
+    if(!nd.mea){ // measurement candidate: rows X_v = M[vi][excIdx_r]
+      const rows=resp.map(ev=>ev.excIdx.map(c=>ev.M[vi][c]));
+      const dv=rows.filter(r=>rowEq(r,rows[0])).length;
+      if(dv<fiber.length)reps.push({type:"measure",node:nd,dv});
+    }
+    if(!nd.exc){ // excitation candidate: c_v = M[meaIdx][vi]
+      const cols=resp.map(ev=>ev.meaIdx.map(c=>ev.M[c][vi]));
+      const dv=cols.filter(r=>rowEq(r,cols[0])).length;
+      if(dv<fiber.length)reps.push({type:"excite",node:nd,dv});
+    }
+  });
+  // module priors: coordinates not constant across fiber
+  const ue=unknownEdges(),pri=[];
+  ue.forEach((e,u)=>{
+    const dv=fiber.filter(th=>cabs(csub(th[u],fiber[0][u]))<1e-6).length;
+    if(dv<fiber.length)pri.push({e,dv});
+  });
+  reps.sort((a,b)=>a.dv-b.dv);pri.sort((a,b)=>a.dv-b.dv);
+  return {reps,pri};
+}
+const rowEq=(a,b)=>a.every((z,i)=>cabs(csub(z,b[i]))<1e-6);
+/* ---------- presets ---------- */
+const presets={
+ empty(){nodes=[];edges=[];nextId=1},
+ chain(){nodes=[mk("1",120,215,{exc:1}),mk("2",320,215,{mea:1}),mk("3",520,215,{mea:1})];
+   edges=[ed("1","2","unknown"),ed("2","3","unknown")]},
+ tri(){nodes=[mk("1",160,310,{exc:1}),mk("2",320,120,{exc:1,mea:1}),mk("3",480,310,{mea:1})];
+   edges=[ed("1","2","unknown"),ed("2","3","unknown"),ed("1","3","unknown")]},
+ paper(){nodes=[mk("e\u2081",70,150,{exc:1}),mk("e\u2082",70,300,{exc:1}),
+   mk("a",210,100,{}),mk("b",210,350,{}),mk("c",360,100,{}),mk("d",360,350,{}),
+   mk("m\u2081",540,150,{mea:1}),mk("m\u2082",540,300,{mea:1})];
+   edges=[ed("e\u2081","a","known",1),ed("e\u2081","b","known",1),ed("e\u2082","a","known",1),
+     ed("a","c","unknown"),ed("c","b","known",1),ed("b","d","unknown"),
+     ed("c","m\u2081","known",1),ed("d","m\u2081","known",1),ed("c","m\u2082","known",2),ed("d","m\u2082","known",1),
+     ed("e\u2082","m\u2081","unknown"),ed("e\u2081","m\u2082","unknown")]}
+};
+function mk(name,x,y,o){return{id:name,name,x,y,exc:!!o.exc,mea:!!o.mea}}
+function ed(t,h,kind,val){return{t,h,kind,val:val==null?1:val}}
+/* ---------- svg rendering & interaction ---------- */
+const svg=document.getElementById("net");
+let mode="idle",pendTail=null,drag=null;
+function render(){
+  const idx=new Map(nodes.map((n,i)=>[n.id,i]));
+  let s=`<defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="context-stroke"/></marker></defs>`;
+  const pairCount={};
+  for(const e of edges){
+    const a=nodes[idx.get(e.t)],b=nodes[idx.get(e.h)];if(!a||!b)continue;
+    const key=[e.t,e.h].sort().join("|");pairCount[key]=(pairCount[key]||0)+1;
+    const bend=(pairCount[key]-1)*34*((e.t<e.h)?1:-1);
+    const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy)||1,ux=dx/L,uy=dy/L;
+    const sx=a.x+ux*22,sy=a.y+uy*22,ex=b.x-ux*26,ey=b.y-uy*26;
+    const mx=(sx+ex)/2-uy*bend,my=(sy+ey)/2+ux*bend;
+    const col=e.kind==="unknown"?"var(--unknown)":"var(--known)";
+    const dash=e.kind==="unknown"?"":"stroke-dasharray=\"7 5\"";
+    s+=`<path d="M${sx} ${sy} Q ${mx} ${my} ${ex} ${ey}" fill="none" stroke="${col}" stroke-width="2.4" ${dash} marker-end="url(#ar)" data-edge="${e.t}\u2192${e.h}" style="cursor:${mode==='del'?'not-allowed':'default'}"/>`;
+    const lx=(sx+2*mx+ex)/4,ly=(sy+2*my+ey)/4;
+    const lab=e.kind==="known"?String(e.val):"\u03b8";
+    s+=`<text x="${lx}" y="${ly-6}" font-size="13" text-anchor="middle" fill="${col}" style="font-family:var(--serif);font-style:italic">${lab}</text>`;
+  }
+  for(const n of nodes){
+    const fill=n.exc&&n.mea?"url(#hb)":n.exc?"var(--excite-soft)":n.mea?"var(--measure-soft)":"var(--paper)";
+    const ring=n.exc&&n.mea?"var(--ink)":n.exc?"var(--excite)":n.mea?"var(--measure)":"var(--faint)";
+    s+=`<g data-node="${n.id}" style="cursor:pointer">`;
+    if(n.exc&&n.mea)s+=`<circle cx="${n.x}" cy="${n.y}" r="20" fill="var(--excite-soft)"/><path d="M ${n.x-20} ${n.y} a20 20 0 0 0 40 0 z" fill="var(--measure-soft)"/>`;
+    else s+=`<circle cx="${n.x}" cy="${n.y}" r="20" fill="${fill}"/>`;
+    s+=`<circle cx="${n.x}" cy="${n.y}" r="20" fill="none" stroke="${ring}" stroke-width="2"/>`;
+    if(pendTail===n.id)s+=`<circle cx="${n.x}" cy="${n.y}" r="25" fill="none" stroke="var(--unknown)" stroke-dasharray="4 4"/>`;
+    s+=`<text x="${n.x}" y="${n.y+5}" text-anchor="middle" font-size="15" fill="var(--ink)" style="font-family:var(--serif);font-style:italic">${n.name}</text></g>`;
+  }
+  svg.innerHTML=s;
+  renderEdgeList();
+  const m=unknownEdges().length,p=excited().length*measured().length;
+  document.getElementById("counts").textContent=
+    `m = ${m} unknown module${m===1?"":"s"}, ${excited().length} excited \u00d7 ${measured().length} measured \u21d2 p = ${p} observed transfer${p===1?"":"s"}.`;
+  save();
+}
+function renderEdgeList(){
+  const el=document.getElementById("edgeList");
+  if(!edges.length){el.textContent="No edges yet.";return}
+  el.innerHTML="<table><tr><th>edge</th><th>module</th><th></th></tr>"+edges.map((e,i)=>
+    `<tr><td class="num">${e.t} \u2192 ${e.h}</td><td>${e.kind==="known"?`known, ${e.val}`:"unknown"}</td>`+
+    `<td><button data-tog="${i}">${e.kind==="known"?"make unknown":"make known"}</button> <button data-del="${i}">remove</button></td></tr>`).join("")+"</table>";
+  el.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{edges.splice(+b.dataset.del,1);render()});
+  el.querySelectorAll("[data-tog]").forEach(b=>b.onclick=()=>{const e=edges[+b.dataset.tog];
+    if(e.kind==="known")e.kind="unknown";else{const v=prompt("Known value for "+e.t+" \u2192 "+e.h+":","1");if(v===null)return;e.kind="known";e.val=parseFloat(v)||0}
+    render()});
+}
+function svgPoint(ev){const pt=svg.createSVGPoint();pt.x=ev.clientX;pt.y=ev.clientY;const q=pt.matrixTransform(svg.getScreenCTM().inverse());return{x:q.x,y:q.y}}
+svg.addEventListener("pointerdown",ev=>{
+  const g=ev.target.closest("[data-node]");
+  if(g){const id=g.dataset.node;
+    if(mode==="edge"){ if(pendTail===null){pendTail=id;render()}else if(pendTail!==id){showEdgeForm(pendTail,id)}else{pendTail=null;render()} return}
+    if(mode==="del"){nodes=nodes.filter(n=>n.id!==id);edges=edges.filter(e=>e.t!==id&&e.h!==id);render();return}
+    drag={id,moved:false};svg.setPointerCapture(ev.pointerId);return}
+  const pe=ev.target.closest("[data-edge]");
+  if(pe&&mode==="del"){const[t,h]=pe.dataset.edge.split("\u2192");
+    const i=edges.findIndex(e=>e.t===t&&e.h===h);if(i>=0)edges.splice(i,1);render()}
+});
+svg.addEventListener("pointermove",ev=>{if(!drag)return;const p=svgPoint(ev);const n=nodes.find(n=>n.id===drag.id);
+  if(n){n.x=Math.max(26,Math.min(614,p.x));n.y=Math.max(26,Math.min(404,p.y));drag.moved=true;render()}});
+svg.addEventListener("pointerup",ev=>{
+  if(drag&&!drag.moved&&mode==="idle"){const n=nodes.find(n=>n.id===drag.id);
+    if(n){const st=n.exc*1+n.mea*2;const nx=(st+1)%4;n.exc=!!(nx&1);n.mea=!!(nx&2);render()}}
+  drag=null;
+});
+function showEdgeForm(t,h){
+  const f=document.getElementById("edgeForm");
+  document.getElementById("efLabel").textContent=t+" \u2192 "+h;
+  f.dataset.t=t;f.dataset.h=h;f.classList.add("show");
+}
+document.getElementById("edgeForm").addEventListener("submit",ev=>{
+  ev.preventDefault();
+  const f=ev.target,t=f.dataset.t,h=f.dataset.h;
+  const kind=f.ek.value;const val=parseFloat(document.getElementById("efVal").value)||1;
+  if(!edges.some(e=>e.t===t&&e.h===h))edges.push({t,h,kind,val});
+  f.classList.remove("show");pendTail=null;setMode("idle");render();
+});
+document.getElementById("efCancel").onclick=()=>{document.getElementById("edgeForm").classList.remove("show");pendTail=null;setMode("idle");render()};
+function setMode(mo){mode=mo;pendTail=null;
+  document.getElementById("edgeMode").setAttribute("aria-pressed",mo==="edge");
+  document.getElementById("delMode").setAttribute("aria-pressed",mo==="del");
+  document.getElementById("modeMsg").textContent=mo==="edge"?"Click the tail node, then the head node.":mo==="del"?"Click a node or an edge to remove it.":"";
+  render();
+}
+document.getElementById("edgeMode").onclick=()=>setMode(mode==="edge"?"idle":"edge");
+document.getElementById("delMode").onclick=()=>setMode(mode==="del"?"idle":"del");
+document.getElementById("addNode").onclick=()=>{
+  const name=prompt("Node name:",String(nextId));if(name===null)return;
+  nodes.push(mk(name||String(nextId),320+60*Math.cos(nextId),215+60*Math.sin(nextId),{}));nextId++;render();
+};
+document.getElementById("preset").onchange=ev=>{presets[ev.target.value]();nextId=nodes.length+1;hideResults();render()};
+function hideResults(){document.getElementById("results").hidden=true}
+/* ---------- run ---------- */
+document.getElementById("run").onclick=()=>{
+  const out=document.getElementById("stepsOut"),ver=document.getElementById("verdict"),rep=document.getElementById("repairs");
+  out.innerHTML="";ver.hidden=true;rep.innerHTML="";
+  document.getElementById("results").hidden=false;
+  const m=unknownEdges().length,p=excited().length*measured().length;
+  const li=t=>{const el=document.createElement("li");el.innerHTML=t;out.appendChild(el);return el};
+  if(!nodes.length){li("The network is empty. Add nodes and edges, or load a preset.");return}
+  if(!m){li("There are no unknown modules, so there is nothing to identify. Toggle an edge to unknown.");return}
+  if(!excited().length||!measured().length){li("At least one excited node and one measured node are needed. Click nodes to assign signals.");return}
+  // step 1: rank test
+  const r=rankTest();
+  const loc=r===m;
+  li(`<b class="t">Rank test.</b> rank <span class="m">Dh</span> = ${r} of m = ${m} at a random point`+(m>p?` <span class="tag">m &gt; p = ${p}, so full column rank is impossible</span>`:"")+
+     ` \u2014 the network is ${loc?'<span class="ok">generically locally identifiable</span>':'<span class="bad">not generically locally identifiable</span>'}.`);
+  if(!loc){
+    ver.hidden=false;ver.innerHTML=`<span class="head">Verdict \u2014</span> trichotomy case (i): the compatible parameters form a positive-dimensional set, so neither local nor global identifiability holds. Add excitations or measurements and rerun.`;
+    const need=nodes.filter(n=>{const hasIn=edges.some(e=>e.h===n.id),hasOut=edges.some(e=>e.t===n.id);return hasIn&&hasOut&&!n.exc&&!n.mea});
+    if(need.length&&edges.every(e=>e.kind==="unknown"))
+      rep.innerHTML=`<p class="small">All modules are unknown and the internal node${need.length>1?"s":""} ${need.map(n=>"<b>"+n.name+"</b>").join(", ")} carr${need.length>1?"y":"ies"} no signal, which already violates the necessary coverage condition.</p>`;
+    return;
+  }
+  // step 2: degree
+  const fib=computeFiber();
+  if(!fib){li("The random probe landed on a singular network; run again.");return}
+  const d=fib.fiber.length;
+  let tbl="";
+  if(d>1&&m<=6){
+    tbl="<table><tr><th></th>"+unknownEdges().map(e=>`<th class="num">${e.t}\u2192${e.h}</th>`).join("")+"</tr>"+
+      fib.fiber.map((th,k)=>`<tr><td>\u03b8${k?"\u207d"+k+"\u207e":"*"}</td>`+th.map(z=>`<td class="num">${fmtC(z)}</td>`).join("")+"</tr>").join("")+"</table>";
+  }
+  li(`<b class="t">Degree.</b> Multistart Newton on <span class="m">h(\u03b8)=h(\u03b8*)</span> finds <b>d = ${d}</b> parameter vector${d===1?"":"s"} compatible with the generic observation.`+tbl);
+  // verdict
+  ver.hidden=false;
+  if(d===1){
+    ver.innerHTML=`<span class="head">Verdict \u2014</span> trichotomy case (iii): with the rank test and d = 1, this choice of excitations and measurements makes the network <span class="ok">generically globally identifiable</span>.`;
+  }else{
+    ver.innerHTML=`<span class="head">Verdict \u2014</span> trichotomy case (ii): the network is generically locally identifiable, but a generic observation leaves <b>${d}</b> candidate networks, so it is <span class="bad">not generically globally identifiable</span> (d = ${d}).`;
+    // step 3: repairs
+    const {reps,pri}=separations(fib.fiber);
+    let html="<ol class='steps' style='margin-top:10px'><li><b class='t'>Repairs.</b> ";
+    if(reps.length){
+      html+="Separating signals, with the degree each would leave:<ul style='margin:.4rem 0 0 .2rem;padding-left:1.1rem'>"+reps.map((s,i)=>
+        `<li class="rep">${s.type==="measure"?"measure":"excite"} node <b>${s.node.name}</b> \u2192 d = ${s.dv}`+
+        `<button data-rep="${i}">apply &amp; rerun</button></li>`).join("")+"</ul>";
+    } else html+="No single added signal separates the candidates. ";
+    if(pri.length)html+=`<p class="small" style="margin:.5rem 0 0">Priors also work: the candidates differ in ${pri.map(s=>`<span class="m">${s.e.t}\u2192${s.e.h}</span> (d = ${s.dv})`).join(", ")}, so fixing or bounding any of these modules selects the true network.</p>`;
+    html+="</li></ol>";
+    rep.innerHTML=html;
+    rep.querySelectorAll("[data-rep]").forEach(b=>b.onclick=()=>{
+      const s=reps[+b.dataset.rep];const n=nodes.find(x=>x.id===s.node.id);
+      if(s.type==="measure")n.mea=true;else n.exc=true;
+      render();document.getElementById("run").click();
+    });
+  }
+};
+/* ---------- text import / export ---------- */
+function parseText(src){
+  const errs=[],eds=[],exc=new Set(),mea=new Set(),names=new Set();
+  src.split(/\r?\n/).forEach((raw,ln)=>{
+    const line=raw.replace(/#.*$/,"").trim();if(!line)return;
+    let mm=line.match(/^excite\s*:\s*(.*)$/i);
+    if(mm){mm[1].split(/[,\s]+/).filter(Boolean).forEach(x=>{exc.add(x);names.add(x)});return}
+    mm=line.match(/^measure\s*:\s*(.*)$/i);
+    if(mm){mm[1].split(/[,\s]+/).filter(Boolean).forEach(x=>{mea.add(x);names.add(x)});return}
+    mm=line.match(/^(\S+)\s*->\s*(\S+?)\s*(?::\s*(\S+))?$/);
+    if(!mm){errs.push("line "+(ln+1)+": cannot read \u201c"+line+"\u201d");return}
+    const[,t,h,v]=mm;names.add(t);names.add(h);
+    if(t===h){errs.push("line "+(ln+1)+": self-loop "+t+" -> "+h+" is not allowed (G has zero diagonal)");return}
+    if(eds.some(e=>e.t===t&&e.h===h)){errs.push("line "+(ln+1)+": duplicate edge "+t+" -> "+h);return}
+    if(v===undefined||v==="?")eds.push({t,h,kind:"unknown",val:1});
+    else{const num=parseFloat(v);if(isNaN(num)){errs.push("line "+(ln+1)+": value \u201c"+v+"\u201d is not a number");return}eds.push({t,h,kind:"known",val:num})}
+  });
+  if(!names.size)errs.push("no nodes found");
+  return {errs,eds,exc,mea,names:[...names]};
+}
+function autoLayout(names,eds){
+  const layer=new Map(),inAdj=new Map(names.map(n=>[n,[]]));
+  eds.forEach(e=>inAdj.get(e.h).push(e.t));
+  const depth=(n,stack)=>{
+    if(layer.has(n))return layer.get(n);
+    if(stack.has(n))return 0; // cycle guard
+    stack.add(n);
+    const d=Math.max(0,...inAdj.get(n).map(p=>depth(p,stack)+1));
+    stack.delete(n);layer.set(n,d);return d;
+  };
+  names.forEach(n=>depth(n,new Set()));
+  const maxL=Math.max(...layer.values(),0);
+  const cols=new Map();
+  names.forEach(n=>{const l=layer.get(n);if(!cols.has(l))cols.set(l,[]);cols.get(l).push(n)});
+  const pos=new Map();
+  cols.forEach((col,l)=>{
+    const x=maxL?60+(520*l)/maxL:320;
+    col.forEach((n,i)=>pos.set(n,{x,y:(430*(i+1))/(col.length+1)}));
+  });
+  return pos;
+}
+document.getElementById("loadTxt").onclick=()=>{
+  const msg=document.getElementById("txtMsg");
+  const r=parseText(document.getElementById("txt").value);
+  if(r.errs.length){msg.textContent=r.errs[0];return}
+  const pos=autoLayout(r.names,r.eds);
+  nodes=r.names.map(n=>({id:n,name:n,x:pos.get(n).x,y:pos.get(n).y,exc:r.exc.has(n),mea:r.mea.has(n)}));
+  edges=r.eds;nextId=nodes.length+1;hideResults();setMode("idle");
+  msg.textContent=nodes.length+" nodes, "+edges.length+" edges loaded.";
+  render();
+};
+document.getElementById("dumpTxt").onclick=()=>{
+  const lines=edges.map(e=>e.kind==="unknown"?`${e.t} -> ${e.h}`:`${e.t} -> ${e.h} : ${e.val}`);
+  lines.push("excite: "+excited().map(n=>n.id).join(", "));
+  lines.push("measure: "+measured().map(n=>n.id).join(", "));
+  document.getElementById("txt").value=lines.join("\n");
+  document.getElementById("txtMsg").textContent="Current network written to the box.";
+};
+/* ---------- init ---------- */
+let restored=false;
+try{const s=JSON.parse(localStorage.getItem("idlab"));if(s&&s.nodes&&s.nodes.length){({nodes,edges,nextId}=s);restored=true}}catch(e){}
+if(!restored)presets.paper();
+render();
+</script>
+</body>
+</html>
