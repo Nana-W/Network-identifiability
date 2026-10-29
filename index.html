@@ -89,6 +89,12 @@ td.num,span.m{font-family:var(--mono);font-size:.88em}
 #edgeForm{display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
 #edgeForm.show{display:flex}
 .small{font-size:.88rem;color:var(--faint)}
+details.how{margin:.55rem 0 0;border:1px solid var(--rule);border-radius:8px;background:var(--canvas);font-size:.88rem}
+details.how summary{cursor:pointer;padding:6px 10px;color:var(--faint)}
+details.how summary:hover{color:var(--ink)}
+details.how .body{padding:2px 10px 10px;overflow-x:auto}
+details.how table{font-size:.84rem}
+details.how td,details.how th{border-bottom:0;padding:2px 10px 2px 0}
 a{color:var(--unknown)}
 @media (prefers-reduced-motion:no-preference){
   .verdict{animation:in .25s ease-out}
@@ -255,17 +261,22 @@ function numRank(Jr){ // real matrix rank via Jacobi eigen of J^T J
   const tol=Math.max(1e-10,(ev[0]||0)*1e-10);
   return ev.filter(v=>v>tol).length;
 }
-function rankTest(){ // max over 3 random real points
-  const m=unknownEdges().length;let best=0;
+function rankTest(){ // max over 3 random real points; keeps the witness point
+  const m=unknownEdges().length;let best=0,showTh=null,showJ=null;
   for(let t=0;t<3;t++){
     const th=Array.from({length:m},()=>C((Math.random()*4-2)||.37));
     const jj=jacobian(th);if(!jj)continue;
     const p=jj.J.length;
     const Jr=[];
     for(let i=0;i<p;i++){Jr.push(jj.J[i].map(z=>z[0]));Jr.push(jj.J[i].map(z=>z[1]))}
-    best=Math.max(best,numRank(Jr));
+    const r=numRank(Jr);
+    if(r>=best){best=r;showTh=th;showJ=jj.J}
   }
-  return best;
+  return {rank:best,showTh,showJ};
+}
+function matHTML(J,rowLabs,colLabs){
+  return "<table><tr><th></th>"+colLabs.map(c=>`<th class="num">${c}</th>`).join("")+"</tr>"+
+    J.map((row,i)=>`<tr><th class="num">${rowLabs[i]}</th>`+row.map(z=>`<td class="num">${fmtC(z)}</td>`).join("")+"</tr>").join("")+"</table>";
 }
 function gaussNewton(th0,yst){ // solve h(θ)=yst from start th0; returns θ or null
   let th=th0.map(z=>z.slice());const m=th.length;
@@ -294,6 +305,11 @@ function gaussNewton(th0,yst){ // solve h(θ)=yst from start th0; returns θ or 
   let nr=0;for(let i=0;i<jj.h.length;i++){const d=csub(jj.h[i],yst[i]);nr+=d[0]*d[0]+d[1]*d[1]}
   return Math.sqrt(nr)<1e-9?th:null;
 }
+function residual(th,yst){
+  const ev=evalAll(th);if(!ev)return Infinity;
+  let s=0;for(let i=0;i<ev.h.length;i++){const d=csub(ev.h[i],yst[i]);s+=d[0]*d[0]+d[1]*d[1]}
+  return Math.sqrt(s);
+}
 function computeFiber(){
   const m=unknownEdges().length;
   const prim=[3,5,7,11,13,17,19,23,29,31,37,41];
@@ -303,15 +319,19 @@ function computeFiber(){
   const found=[thStar];
   const scales=[.4,1,2.5];
   const tries=Math.min(420,120*m+120);
+  const stats={tries:0,converged:0,discarded:0};
   for(let t=0;t<tries;t++){
+    stats.tries++;
     const sc=scales[t%3];
     const st=thStar.map(z=>C(z[0]+sc*gauss(),z[1]+sc*gauss()));
     const sol=gaussNewton(st,yst);
     if(!sol)continue;
-    if(sol.some(z=>cabs(z)>1e6))continue;
+    stats.converged++;
+    if(sol.some(z=>cabs(z)>1e6)){stats.discarded++;continue}
     if(!found.some(f=>dist(f,sol)<1e-5*(1+norm(sol))))found.push(sol);
   }
-  return {thStar,yst,fiber:found};
+  const res=found.map(th=>residual(th,yst));
+  return {thStar,yst,fiber:found,stats,res};
 }
 const gauss=()=>{let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)};
 const dist=(a,b)=>Math.sqrt(a.reduce((s,z,i)=>s+(z[0]-b[i][0])**2+(z[1]-b[i][1])**2,0));
@@ -471,10 +491,22 @@ document.getElementById("run").onclick=()=>{
   if(!m){li("There are no unknown modules, so there is nothing to identify. Toggle an edge to unknown.");return}
   if(!excited().length||!measured().length){li("At least one excited node and one measured node are needed. Click nodes to assign signals.");return}
   // step 1: rank test
-  const r=rankTest();
+  const rt=rankTest();
+  const r=rt.rank;
   const loc=r===m;
+  let rankHow="";
+  if(rt.showJ){
+    const colLabs=unknownEdges().map(e=>`\u2202/\u2202\u03b8(${e.t}\u2192${e.h})`);
+    const rowLabs=[];for(const er of excited())for(const c of measured())rowLabs.push(`h(${c.name},${er.name})`);
+    rankHow=`<details class="how"><summary>How the Jacobian was computed</summary><div class="body">`+
+      `<p>Each entry uses the resolvent identity: for the unknown edge <span class="m">i\u2192j</span>, writing <span class="m">M=(I\u2212G(\u03b8))\u207b\u00b9</span>,</p>`+
+      `<p class="m" style="margin:.2rem 0">\u2202h(c,b)/\u2202\u03b8(i\u2192j) = M[c,j]\u00b7M[i,b]</p>`+
+      `<p>so one linear solve for M gives the whole matrix exactly, no finite differences. At the random point <span class="m">\u03b8 = (${rt.showTh.map(z=>fmtC(z)).join(", ")})</span> the Jacobian <span class="m">Dh</span> (rows h(measured, excited), columns the unknown edges) is</p>`+
+      (rowLabs.length<=12&&m<=8?matHTML(rt.showJ,rowLabs,colLabs):`<p>(${rowLabs.length}\u00d7${m}, too large to display)</p>`)+
+      `<p>The rank is the number of eigenvalues of <span class="m">J\u1d40J</span> above 10\u207b\u00b9\u2070\u00b7max, maximized over 3 random points, since the rank can only drop on an exceptional variety.</p></div></details>`;
+  }
   li(`<b class="t">Rank test.</b> rank <span class="m">Dh</span> = ${r} of m = ${m} at a random point`+(m>p?` <span class="tag">m &gt; p = ${p}, so full column rank is impossible</span>`:"")+
-     ` \u2014 the network is ${loc?'<span class="ok">generically locally identifiable</span>':'<span class="bad">not generically locally identifiable</span>'}.`);
+     ` \u2014 the network is ${loc?'<span class="ok">generically locally identifiable</span>':'<span class="bad">not generically locally identifiable</span>'}.`+rankHow);
   if(!loc){
     ver.hidden=false;ver.innerHTML=`<span class="head">Verdict \u2014</span> trichotomy case (i): the compatible parameters form a positive-dimensional set, so neither local nor global identifiability holds. Add excitations or measurements and rerun.`;
     const need=nodes.filter(n=>{const hasIn=edges.some(e=>e.h===n.id),hasOut=edges.some(e=>e.t===n.id);return hasIn&&hasOut&&!n.exc&&!n.mea});
@@ -487,11 +519,16 @@ document.getElementById("run").onclick=()=>{
   if(!fib){li("The random probe landed on a singular network; run again.");return}
   const d=fib.fiber.length;
   let tbl="";
-  if(d>1&&m<=6){
-    tbl="<table><tr><th></th>"+unknownEdges().map(e=>`<th class="num">${e.t}\u2192${e.h}</th>`).join("")+"</tr>"+
-      fib.fiber.map((th,k)=>`<tr><td>\u03b8${k?"\u207d"+k+"\u207e":"*"}</td>`+th.map(z=>`<td class="num">${fmtC(z)}</td>`).join("")+"</tr>").join("")+"</table>";
+  if(m<=6&&(d>1||m<=4)){
+    tbl="<table><tr><th></th>"+unknownEdges().map(e=>`<th class="num">${e.t}\u2192${e.h}</th>`).join("")+`<th class="num">\u2016h(\u03b8)\u2212y*\u2016</th></tr>`+
+      fib.fiber.map((th,k)=>`<tr><td>\u03b8${k?"\u207d"+k+"\u207e":"*"}</td>`+th.map(z=>`<td class="num">${fmtC(z)}</td>`).join("")+`<td class="num">${fib.res[k]<1e-14?"&lt;1e\u221214":fib.res[k].toExponential(1)}</td></tr>`).join("")+"</table>";
   }
-  li(`<b class="t">Degree.</b> Multistart Newton on <span class="m">h(\u03b8)=h(\u03b8*)</span> finds <b>d = ${d}</b> parameter vector${d===1?"":"s"} compatible with the generic observation.`+tbl);
+  const st=fib.stats;
+  const degHow=`<details class="how"><summary>How the fiber was computed</summary><div class="body">`+
+    `<p>Probe: a fixed generic point <span class="m">\u03b8* = (${fib.thStar.map(z=>fmtC(z)).join(", ")})</span> gives the observation <span class="m">y* = (${fib.yst.map(z=>fmtC(z)).join(", ")})</span>. The fiber is the solution set of <span class="m">h(\u03b8) = y*</span>.</p>`+
+    `<p>Solver: ${st.tries} starts <span class="m">\u03b8* + complex Gaussian noise</span> at scales 0.4, 1 and 2.5, each run through damped Gauss\u2013Newton with the exact complex Jacobian (normal equations <span class="m">J\u1d34J\u00b7\u0394 = \u2212J\u1d34r</span>, line search, 60 iterations max, convergence at residual 10\u207b\u00b9\u00b9). Of these, ${st.converged} converged${st.discarded?`, ${st.discarded} were discarded for a coordinate beyond 10\u2076 (solutions escaping toward infinity)`:""}; clustering the rest at relative tolerance 10\u207b\u2075 leaves <b>${d}</b> distinct point${d===1?"":"s"}.</p>`+
+    `<p>Starts are complex because fiber points are complex in general; real starts would stay in the real slice. The count is a numerical lower bound on d: unlike the monodromy + trace test of the paper, nothing here certifies that no further point exists.</p></div></details>`;
+  li(`<b class="t">Degree.</b> Multistart Newton on <span class="m">h(\u03b8)=h(\u03b8*)</span> finds <b>d = ${d}</b> parameter vector${d===1?"":"s"} compatible with the generic observation.`+tbl+degHow);
   // verdict
   ver.hidden=false;
   if(d===1){
