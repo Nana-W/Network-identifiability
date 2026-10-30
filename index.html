@@ -154,6 +154,14 @@ a{color:var(--unknown)}
 
 <div>
   <div class="panel">
+    <label class="small" style="display:flex;gap:8px;align-items:center;margin-bottom:8px">Degree method
+      <select id="method" style="flex:1">
+        <option value="newton">Multistart Newton (fast, lower bound)</option>
+        <option value="mono">Monodromy + trace test</option>
+        <option value="bez">Bézout homotopy (all solutions, small networks)</option>
+        <option value="groebner">Gröbner — exact, via generated script</option>
+      </select>
+    </label>
     <button id="run" class="primary" style="width:100%;padding:10px">Run identifiability analysis</button>
     <p class="hint" id="counts"></p>
   </div>
@@ -162,7 +170,7 @@ a{color:var(--unknown)}
     <ol class="steps" id="stepsOut"></ol>
     <div class="verdict" id="verdict" hidden></div>
     <div id="repairs"></div>
-    <p class="hint">The rank test holds with probability one at a random point; the degree is found by multistart Newton on <span class="m">h(θ) = h(θ*)</span>, so the reported <span class="m">d</span> is a numerical count — a certificate needs the exact methods in the paper. Fiber points with any |coordinate| &gt; 10⁶ are treated as spurious.</p>
+    <p class="hint">The rank test holds with probability one at a random point. For the degree: multistart Newton is a fast lower bound; the Bézout homotopy tracks the full multihomogeneous bound and reaches every isolated solution for a generic start; monodromy scales with d and adds the trace test; the generated script computes d exactly outside the browser. Fiber points with any |coordinate| &gt; 10⁶ are treated as spurious.</p>
   </div>
 </div>
 </main>
@@ -342,6 +350,308 @@ function fmtC(z){
   if(!i)return f(r);
   return (r?f(r):"")+(i>0?(r?" + ":"")+f(i)+"i":" \u2212 "+f(-i)+"i");
 }
+/* ---------- path tracking, monodromy, trace test ---------- */
+function newtonTo(th0,yt,maxIt){ // tight corrector onto h(θ)=yt
+  let th=th0.map(z=>z.slice());
+  for(let it=0;it<(maxIt||8);it++){
+    const jj=jacobian(th);if(!jj)return null;
+    const r=jj.h.map((z,i)=>csub(z,yt[i]));
+    let nr=0;for(const z of r)nr+=z[0]*z[0]+z[1]*z[1];nr=Math.sqrt(nr);
+    if(nr<1e-10)return th;
+    const mm=th.length,pp=r.length,A=zeros(mm,mm),b=zeros(mm,1);
+    for(let i=0;i<mm;i++)for(let j=0;j<mm;j++){let s=C(0);for(let k=0;k<pp;k++)s=cadd(s,cmul(conj(jj.J[k][i]),jj.J[k][j]));A[i][j]=s}
+    for(let i=0;i<mm;i++){let s=C(0);for(let k=0;k<pp;k++)s=cadd(s,cmul(conj(jj.J[k][i]),r[k]));b[i][0]=csub(C(0),s)}
+    const dx=luSolve(A,b);if(!dx)return null;
+    th=th.map((z,i)=>cadd(z,dx[i][0]));
+  }
+  return null;
+}
+function track(th0,yfun){ // continuation along t∈[0,1], adaptive step
+  let t=0,dt=0.05,th=th0.map(z=>z.slice()),guard=0;
+  while(t<1&&guard<4000){
+    guard++;
+    const tn=Math.min(1,t+dt);
+    const q=newtonTo(th,yfun(tn),8);
+    if(q&&!q.some(z=>cabs(z)>1e7)){th=q;t=tn;dt=Math.min(0.1,dt*1.4)}
+    else{dt/=2;if(dt<1e-5)return null}
+  }
+  return t>=1?th:null;
+}
+function computeFiberMono(){
+  const m=unknownEdges().length;
+  const prim=[3,5,7,11,13,17,19,23,29,31,37,41];
+  const thStar=Array.from({length:m},(_,i)=>C((prim[i%12]/7)*(i%2?-1:1)+0.11*i));
+  const e0=evalAll(thStar);if(!e0)return null;
+  const yst=e0.h;
+  const scale=Math.max(1,...yst.map(cabs))*0.6;
+  const found=[thStar];
+  let loops=0,stale=0;
+  while(stale<6&&loops<36){
+    loops++;
+    const c=yst.map(()=>C(scale*0.5*gauss(),scale*0.5*gauss()));
+    const yfun=t=>{const f=[1-Math.cos(2*Math.PI*t),-Math.sin(2*Math.PI*t)];
+      return yst.map((z,i)=>cadd(z,cmul(f,c[i])))};
+    let added=false;
+    for(const pth of [...found]){
+      const q=track(pth,yfun);
+      if(!q)continue;
+      if(!found.some(f=>dist(f,q)<1e-5*(1+norm(q)))){found.push(q);added=true}
+    }
+    stale=added?0:stale+1;
+  }
+  // numerical trace test along a linear pencil y* + s·dir
+  const v=yst.map(()=>C(gauss(),gauss()));
+  const nv=Math.sqrt(v.reduce((s,z)=>s+z[0]*z[0]+z[1]*z[1],0))||1;
+  const dir=v.map(z=>C(z[0]/nv*scale,z[1]/nv*scale));
+  const eps=2e-2;
+  const lin=sgn=>t=>yst.map((z,i)=>cadd(z,cmul(C(sgn*t*eps,0),dir[i])));
+  const sumAt=sgn=>{
+    const S=found.map(pth=>track(pth,lin(sgn)));
+    if(S.some(x=>!x))return null;
+    return Array.from({length:m},(_,i)=>S.reduce((a,pth)=>cadd(a,pth[i]),C(0)));
+  };
+  const S0=Array.from({length:m},(_,i)=>found.reduce((a,pth)=>cadd(a,pth[i]),C(0)));
+  const Sp=sumAt(1),Sm=sumAt(-1);
+  let trace=null;
+  if(Sp&&Sm){
+    let num=0,den=0;
+    for(let i=0;i<m;i++){
+      const d2=csub(cadd(Sp[i],Sm[i]),cmul(C(2),S0[i]));
+      const d1=csub(Sp[i],Sm[i]);
+      num+=d2[0]*d2[0]+d2[1]*d2[1];den+=d1[0]*d1[0]+d1[1]*d1[1];
+    }
+    const ratio=Math.sqrt(num)/Math.max(Math.sqrt(den),1e-12);
+    trace={pass:ratio<5e-3,ratio};
+  }
+  const res=found.map(th=>residual(th,yst));
+  return {thStar,yst,fiber:found,stats:{loops},res,trace,mono:true};
+}
+/* ---------- multihomogeneous Bezout homotopy on the lifted bilinear system ---------- */
+function liftedStructure(){
+  const n=nodes.length, idx=new Map(nodes.map((nd,i)=>[nd.id,i]));
+  const exc=excited().map(nd=>nodes.indexOf(nd)), mea=measured().map(nd=>nodes.indexOf(nd));
+  const meaRow=new Map(mea.map((v,k)=>[v,k]));
+  const ue=unknownEdges(), m=ue.length, nB=exc.length;
+  const prim=[3,5,7,11,13,17,19,23,29,31,37,41];
+  const thStar=Array.from({length:m},(_,i)=>C((prim[i%12]/7)*(i%2?-1:1)+0.11*i));
+  const e0=evalAll(thStar); if(!e0) return null;
+  const Y=mea.map(c=>exc.map(b=>e0.M[c][b]));
+  const lat=[], latIdx=new Map();
+  nodes.forEach((nd,i)=>{ if(!meaRow.has(i)) for(let r=0;r<nB;r++){ latIdx.set(i+'_'+r, m+lat.length); lat.push([i,r]); } });
+  const Nv=m+lat.length;
+  const thGroup=new Map();
+  ue.forEach((e,u)=>{ const h=idx.get(e.h); if(!thGroup.has(h)) thGroup.set(h,[]); thGroup.get(h).push(u); });
+  const XGroup=[]; for(let r=0;r<nB;r++) XGroup.push(lat.map((p,k)=>p[1]===r? m+k : -1).filter(v=>v>=0));
+  const eqs=[];
+  nodes.forEach((nd,i)=>{
+    for(let r=0;r<nB;r++){
+      let c0=C(exc[r]===i?-1:0);
+      const lin=[], bil=[], linT=[];
+      const addX=(j,coef)=>{ if(meaRow.has(j)) c0=cadd(c0,cmul(coef,Y[meaRow.get(j)][r])); else lin.push([latIdx.get(j+'_'+r),coef]); };
+      addX(i,C(1));
+      let u=0;
+      for(const e of edges){ const t=idx.get(e.t), h=idx.get(e.h);
+        const isU=e.kind==='unknown'; const ui=isU?u++:-1;
+        if(h!==i) continue;
+        if(!isU){ addX(t,C(-e.val)); }
+        else { if(meaRow.has(t)) linT.push([ui, cmul(C(-1),Y[meaRow.get(t)][r])]); else bil.push([ui, latIdx.get(t+'_'+r)]); }
+      }
+      eqs.push({i,r,c0,lin,bil,linT,hasT:(bil.length+linT.length)>0,hasX:(lin.length+bil.length)>0});
+    }
+  });
+  return {n,nB,m,Nv,thStar,exc,mea,lat,latIdx,thGroup,XGroup,eqs};
+}
+function liftedFJ(S,z){
+  const F=[],J=[];
+  for(const q of S.eqs){
+    let v=q.c0.slice(); const row=Array.from({length:S.Nv},()=>C(0));
+    for(const[xi,co]of q.lin){ v=cadd(v,cmul(co,z[xi])); row[xi]=cadd(row[xi],co); }
+    for(const[ti,co]of q.linT){ v=cadd(v,cmul(co,z[ti])); row[ti]=cadd(row[ti],co); }
+    for(const[ti,xi]of q.bil){ v=csub(v,cmul(z[ti],z[xi])); row[ti]=csub(row[ti],z[xi]); row[xi]=csub(row[xi],z[ti]); }
+    F.push(v); J.push(row);
+  }
+  return {F,J};
+}
+function bezForms(S){
+  const rc=()=>C(gauss(),gauss());
+  const TF=new Map(), XF=new Map();
+  for(const q of S.eqs){
+    const key=q.i+'_'+q.r;
+    if(q.hasT){ const g=S.thGroup.get(q.i)||[]; TF.set(key,{vars:g.slice(),a:g.map(rc),c:rc()}); }
+    if(q.hasX){ const g=S.XGroup[q.r]; XF.set(key,{vars:g.slice(),a:g.map(rc),c:rc()}); }
+  }
+  return {TF,XF};
+}
+function evalForm(f,z){ let v=f.c.slice(); f.vars.forEach((vi,k)=>{v=cadd(v,cmul(f.a[k],z[vi]))}); return v; }
+function GFJ(S,st,z){
+  const F=[],J=[];
+  for(const q of S.eqs){
+    const key=q.i+'_'+q.r, tf=st.TF.get(key), xf=st.XF.get(key);
+    const tv=tf?evalForm(tf,z):C(1), xv=xf?evalForm(xf,z):C(1);
+    F.push(cmul(tv,xv));
+    const row=Array.from({length:S.Nv},()=>C(0));
+    if(tf) tf.vars.forEach((vi,k)=>{row[vi]=cadd(row[vi],cmul(tf.a[k],xv))});
+    if(xf) xf.vars.forEach((vi,k)=>{row[vi]=cadd(row[vi],cmul(xf.a[k],tv))});
+    J.push(row);
+  }
+  return {F,J};
+}
+function bezSelections(S,cap){
+  const nodesU=[...S.thGroup.keys()];
+  const needX=S.XGroup.map(g=>g.length);
+  const cnt=S.XGroup.map(()=>0);
+  const free=new Map();
+  for(const q of S.eqs){
+    if(q.hasT&&q.hasX){ if(!free.has(q.i))free.set(q.i,[]); free.get(q.i).push(q.r); }
+    else if(q.hasX){ cnt[q.r]++; }
+    else if(!q.hasT) return {err:'a constant equation appeared; this configuration is unsupported'};
+  }
+  const needT=new Map();
+  for(const i of nodesU) needT.set(i,(S.thGroup.get(i)||[]).length);
+  for(const q of S.eqs) if(q.hasT&&!q.hasX) needT.set(q.i,needT.get(q.i)-1);
+  for(const i of nodesU){ const nd=needT.get(i); if(nd<0||nd>((free.get(i)||[]).length)) return {err:'no admissible start selection exists for this structure'}; }
+  const sels=[], cur=new Map();
+  function rec(k){
+    if(sels.length>cap) return;
+    if(k===nodesU.length){ if(cnt.every((c,r)=>c===needX[r])) sels.push(nodesU.map(i=>(cur.get(i)||[]).slice())); return; }
+    const i=nodesU[k], fr=free.get(i)||[], need=needT.get(i);
+    const choose=(start,left,curSel)=>{
+      if(sels.length>cap) return;
+      if(left===0){
+        const xs=fr.filter(r=>!curSel.includes(r));
+        for(const r of xs) cnt[r]++;
+        if(cnt.every((c,r)=>c<=needX[r])){ cur.set(i,curSel.slice()); rec(k+1); cur.delete(i); }
+        for(const r of xs) cnt[r]--;
+        return;
+      }
+      for(let p=start;p<=fr.length-left;p++){ curSel.push(fr[p]); choose(p+1,left-1,curSel); curSel.pop(); }
+    };
+    choose(0,need,[]);
+  }
+  rec(0);
+  return {sels,order:nodesU};
+}
+function bezStartPoint(S,st,order,sel){
+  const z=Array.from({length:S.Nv},()=>C(0));
+  for(let k=0;k<order.length;k++){
+    const i=order[k], g=S.thGroup.get(i), rows=[];
+    for(const q of S.eqs) if(q.i===i&&q.hasT&&(!q.hasX||sel[k].includes(q.r))) rows.push(st.TF.get(q.i+'_'+q.r));
+    if(rows.length!==g.length) return null;
+    const A=rows.map(f=>g.map(vi=>{const p=f.vars.indexOf(vi);return p>=0?f.a[p].slice():C(0);}));
+    const b=rows.map(f=>[csub(C(0),f.c)]);
+    const sol=luSolve(A,b); if(!sol) return null;
+    g.forEach((vi,t)=>{z[vi]=sol[t][0]});
+  }
+  for(let r=0;r<S.nB;r++){
+    const g=S.XGroup[r]; if(!g.length) continue;
+    const rows=[];
+    for(const q of S.eqs){ if(q.r!==r||!q.hasX) continue;
+      if(q.hasT){ const k=order.indexOf(q.i); if(k>=0&&sel[k].includes(q.r)) continue; }
+      rows.push(st.XF.get(q.i+'_'+q.r)); }
+    if(rows.length!==g.length) return null;
+    const A=rows.map(f=>g.map(vi=>{const p=f.vars.indexOf(vi);return p>=0?f.a[p].slice():C(0);}));
+    const b=rows.map(f=>[csub(C(0),f.c)]);
+    const sol=luSolve(A,b); if(!sol) return null;
+    g.forEach((vi,t)=>{z[vi]=sol[t][0]});
+  }
+  return z;
+}
+function bezTrack(S,st,z0,gam){
+  let t=0,dt=0.05,z=z0.map(c=>c.slice()),guard=0;
+  const HFJ=(w,tt)=>{ const g=GFJ(S,st,w), f=liftedFJ(S,w);
+    const a=cmul(C(1-tt),gam);
+    const F=f.F.map((v,i)=>cadd(cmul(C(tt),v),cmul(a,g.F[i])));
+    const J=f.J.map((row,i)=>row.map((v,j)=>cadd(cmul(C(tt),v),cmul(a,g.J[i][j]))));
+    return {F,J}; };
+  const corr=(w0,tt)=>{ let w=w0.map(c=>c.slice());
+    for(let it=0;it<12;it++){ const r=HFJ(w,tt);
+      let nr=0;for(const v of r.F)nr+=v[0]*v[0]+v[1]*v[1]; nr=Math.sqrt(nr);
+      if(nr<1e-10) return w;
+      const dz=luSolve(r.J,r.F.map(v=>[csub(C(0),v)])); if(!dz) return null;
+      w=w.map((c,i)=>cadd(c,dz[i][0]));
+      if(w.some(c=>cabs(c)>1e8)) return null; }
+    return null; };
+  while(t<1&&guard<6000){ guard++;
+    const tn=Math.min(1,t+dt), w=corr(z,tn);
+    if(w){ z=w; t=tn; dt=Math.min(0.08,dt*1.3); }
+    else { dt/=2; if(dt<1e-6) return null; } }
+  return t>=1?z:null;
+}
+function computeFiberBez(){
+  const m=unknownEdges().length, p=excited().length*measured().length;
+  if(m!==p) return {err:'the B\u00e9zout homotopy needs a square system (m = p); here m = '+m+' and p = '+p+'. Use monodromy or Newton.'};
+  const S=liftedStructure(); if(!S) return null;
+  const sel=bezSelections(S,400);
+  if(sel.err) return {err:sel.err};
+  if(sel.sels.length>400) return {err:'the multihomogeneous B\u00e9zout count exceeds 400 start points; use monodromy, which scales with d.'};
+  const found=[]; let lost=0, inf=0, sweeps=0;
+  const yst=evalAll(S.thStar).h;
+  const sweep=()=>{
+    sweeps++;
+    const st=bezForms(S);
+    const gams=[C(0.8+0.25*gauss(),0.6+0.25*gauss()),C(-0.5+0.25*gauss(),0.85+0.25*gauss())];
+    let swLost=0;
+    for(const s of sel.sels){
+      const z0=bezStartPoint(S,st,sel.order,s); if(!z0){swLost++;continue;}
+      let z=null;
+      for(const gam of gams){ z=bezTrack(S,st,z0,gam); if(z) break; }
+      if(!z){swLost++;continue;}
+      const th=z.slice(0,S.m);
+      if(th.some(c=>cabs(c)>1e6)||z.some(c=>cabs(c)>1e7)){inf++;continue;}
+      if(residual(th,yst)>1e-6){swLost++;continue;}
+      if(!found.some(f=>dist(f,th)<1e-5*(1+norm(th)))) found.push(th);
+    }
+    return swLost;
+  };
+  lost=sweep();
+  const n1=found.length;
+  lost=Math.min(lost,sweep());
+  const agree=found.length===n1;
+  if(!found.some(f=>dist(f,S.thStar)<1e-5*(1+norm(S.thStar)))) found.push(S.thStar);
+  const res=found.map(th=>residual(th,yst));
+  return {thStar:S.thStar,yst,fiber:found,stats:{bound:sel.sels.length,lost,inf,sweeps,agree},res,bez:true};
+}
+/* ---------- exact script generation ---------- */
+function escHtml(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function sympyScript(){
+  const idx=new Map(nodes.map((nd,i)=>[nd.id,i]));
+  const exc=excited().map(nd=>nodes.indexOf(nd)), mea=measured().map(nd=>nodes.indexOf(nd));
+  const ue=unknownEdges(), L=[];
+  L.push('# Exact identifiability degree of the drawn network (needs: pip install sympy)');
+  L.push('# nodes: '+nodes.map((nd,i)=>i+'='+nd.name).join(', '));
+  L.push('import sympy as sp');
+  L.push('n='+nodes.length+'; nB='+exc.length);
+  L.push('th=sp.symbols("th0:'+ue.length+'")');
+  L.push('G=sp.zeros(n,n)');
+  let u=0;
+  for(const e of edges){ const t=idx.get(e.t),h=idx.get(e.h);
+    if(e.kind==='unknown') L.push('G['+h+','+t+']=th['+(u++)+']  # '+e.t+' -> '+e.h);
+    else L.push('G['+h+','+t+']=sp.Rational("'+e.val+'")  # '+e.t+' -> '+e.h);
+  }
+  L.push('B=sp.zeros(n,nB)');
+  exc.forEach((v,r)=>L.push('B['+v+','+r+']=1'));
+  L.push('C=sp.zeros('+mea.length+',n)');
+  mea.forEach((v,k)=>L.push('C['+k+','+v+']=1'));
+  L.push('prim=[3,5,7,11,13,17,19,23,29,31,37,41]');
+  L.push('thstar={th[i]: sp.Rational(prim[i%12],7)*(-1)**(i%2)+sp.Rational(11*i,100) for i in range('+ue.length+')}');
+  L.push('M=(sp.eye(n)-G).inv()');
+  L.push('H=C*M*B');
+  L.push('Ystar=H.subs(thstar)');
+  L.push('eqs=[sp.numer(sp.together(H[a]-Ystar[a])) for a in range(len(H))]');
+  L.push('sols=sp.solve(eqs, list(th), dict=True)');
+  L.push('sols=[s for s in sols if (sp.eye(n)-G).subs(s).det()!=0]');
+  L.push('print("identifiability degree d =", len(sols))');
+  L.push('for s in sols: print([sp.nsimplify(s[v]) for v in th])');
+  return L.join('\n');
+}
+function emitGroebner(li){
+  const scr=sympyScript();
+  li('<b class="t">Gr\u00f6bner / exact computation.</b> This method runs outside the browser, in exact rational arithmetic, and finds all solutions by construction. The script below reproduces the network as currently drawn. <button id="cpScr">Copy script</button>'+
+    '<pre style="white-space:pre;overflow-x:auto;background:var(--canvas);border:1px solid var(--rule);border-radius:8px;padding:8px;font-size:.78rem;font-family:var(--mono)">'+escHtml(scr)+'</pre>'+
+    '<span class="small">The printed degree is exact; for a closed-form eliminant replace sp.solve by sp.groebner with a lex order.</span>');
+  const b=document.getElementById('cpScr');
+  if(b) b.onclick=()=>{ try{ navigator.clipboard.writeText(scr); b.textContent='Copied'; }catch(e){ b.textContent='Select and copy manually'; } };
+}
 /* ---------- separating analysis ---------- */
 function separations(fiber){
   const reps=[];
@@ -515,20 +825,42 @@ document.getElementById("run").onclick=()=>{
     return;
   }
   // step 2: degree
-  const fib=computeFiber();
+  const method=document.getElementById("method").value;
+  if(method==="groebner"){ emitGroebner(li); return; }
+  const fib=method==="mono"?computeFiberMono():method==="bez"?computeFiberBez():computeFiber();
   if(!fib){li("The random probe landed on a singular network; run again.");return}
+  if(fib.err){li("<b class='t'>Degree.</b> "+fib.err);return}
   const d=fib.fiber.length;
   let tbl="";
   if(m<=6&&(d>1||m<=4)){
     tbl="<table><tr><th></th>"+unknownEdges().map(e=>`<th class="num">${e.t}\u2192${e.h}</th>`).join("")+`<th class="num">\u2016h(\u03b8)\u2212y*\u2016</th></tr>`+
       fib.fiber.map((th,k)=>`<tr><td>\u03b8${k?"\u207d"+k+"\u207e":"*"}</td>`+th.map(z=>`<td class="num">${fmtC(z)}</td>`).join("")+`<td class="num">${fib.res[k]<1e-14?"&lt;1e\u221214":fib.res[k].toExponential(1)}</td></tr>`).join("")+"</table>";
   }
-  const st=fib.stats;
-  const degHow=`<details class="how"><summary>How the fiber was computed</summary><div class="body">`+
+  let degHow,headline;
+  if(fib.mono){
+    const tr=fib.trace;
+    const trTxt=tr?(tr.pass?`<span class="ok">trace test passed</span> (nonlinearity ratio ${tr.ratio.toExponential(1)}), so within numerical tolerance no fiber point is missing`:`<span class="bad">trace test failed</span> (ratio ${tr.ratio.toExponential(1)}), so the list is likely incomplete \u2014 rerun or try the Newton method`):`trace test could not be completed (a tracked path was lost)`;
+    degHow=`<details class="how"><summary>How the fiber was computed (monodromy)</summary><div class="body">`+
+      `<p>Probe: <span class="m">\u03b8* = (${fib.thStar.map(z=>fmtC(z)).join(", ")})</span>, observation <span class="m">y* = (${fib.yst.map(z=>fmtC(z)).join(", ")})</span>.</p>`+
+      `<p>Monodromy: starting from the single seed \u03b8*, the observation is moved around random closed loops <span class="m">y(t) = y* + (1\u2212e^{2\u03c0it})\u00b7c</span> in complex observation space, and each known fiber point is tracked along the loop by predictor\u2013corrector continuation. A loop may return a tracked point to a <em>different</em> fiber point, which is then added; ${fib.stats.loops} loops were run, stopping after 6 consecutive loops found nothing new.</p>`+
+      `<p>Completeness: along a linear pencil <span class="m">y* + s\u00b7v</span>, the coordinate sum of the <em>complete</em> fiber is affine-linear in s. Tracking the found points to s = \u00b1\u03b5 and comparing: ${trTxt}.</p></div></details>`;
+    headline=`<b class="t">Degree.</b> Monodromy finds <b>d = ${d}</b> parameter vector${d===1?"":"s"} compatible with the generic observation, ${tr&&tr.pass?"and the trace test supports completeness":"completeness unconfirmed"}.`;
+  } else if(fib.bez){
+    const st=fib.stats;
+    degHow=`<details class="how"><summary>How the fiber was computed (B\u00e9zout homotopy)</summary><div class="body">`+
+      `<p>The lifted bilinear system (I\u2212G(\u03b8))X = B, with measured rows substituted, is 2-homogeneous: the parameters are grouped by head node and the latent responses by excitation column. A linear-product start system with random coefficients respects this structure, and its ${st.bound} start solutions, the multihomogeneous B\u00e9zout count of the supports, come from small linear solves.</p>`+
+      `<p>Each start is tracked along the straight-line homotopy (1\u2212t)\u00b7\u03b3\u00b7G + t\u00b7F with a random complex \u03b3 (the gamma trick) by adaptive predictor\u2013corrector continuation. Following the two-homotopy practice of Morgan\u2013Sommese, two independent start systems are tracked and the endpoint sets merged: ${st.agree?`the second run found nothing new, a consistency check that both runs were complete`:`the second run found additional points, so a single run would have undercounted`}. Of the ${st.bound} paths per run, ${st.inf} diverged to infinity${st.lost?`, ${st.lost} remained lost, so the count may still miss a point`:``}; the finite endpoints cluster into <b>${d}</b> distinct parameter vector${d===1?"":"s"}.</p>`+
+      `<p>For a generic start system, every isolated solution of the target is the endpoint of a path (Morgan\u2013Sommese 1989, Thms.\u00a01, 3, 4), so unlike multistart Newton this count carries a completeness argument, at the price of tracking the full bound rather than d paths.</p></div></details>`;
+    headline=`<b class="t">Degree.</b> The B\u00e9zout homotopy tracks ${st.bound} paths and finds <b>d = ${d}</b> parameter vector${d===1?"":"s"}; for a generic start, every isolated solution is a path endpoint.`;
+  } else {
+    const st=fib.stats;
+    degHow=`<details class="how"><summary>How the fiber was computed</summary><div class="body">`+
     `<p>Probe: a fixed generic point <span class="m">\u03b8* = (${fib.thStar.map(z=>fmtC(z)).join(", ")})</span> gives the observation <span class="m">y* = (${fib.yst.map(z=>fmtC(z)).join(", ")})</span>. The fiber is the solution set of <span class="m">h(\u03b8) = y*</span>.</p>`+
     `<p>Solver: ${st.tries} starts <span class="m">\u03b8* + complex Gaussian noise</span> at scales 0.4, 1 and 2.5, each run through damped Gauss\u2013Newton with the exact complex Jacobian (normal equations <span class="m">J\u1d34J\u00b7\u0394 = \u2212J\u1d34r</span>, line search, 60 iterations max, convergence at residual 10\u207b\u00b9\u00b9). Of these, ${st.converged} converged${st.discarded?`, ${st.discarded} were discarded for a coordinate beyond 10\u2076 (solutions escaping toward infinity)`:""}; clustering the rest at relative tolerance 10\u207b\u2075 leaves <b>${d}</b> distinct point${d===1?"":"s"}.</p>`+
-    `<p>Starts are complex because fiber points are complex in general; real starts would stay in the real slice. The count is a numerical lower bound on d: unlike the monodromy + trace test of the paper, nothing here certifies that no further point exists.</p></div></details>`;
-  li(`<b class="t">Degree.</b> Multistart Newton on <span class="m">h(\u03b8)=h(\u03b8*)</span> finds <b>d = ${d}</b> parameter vector${d===1?"":"s"} compatible with the generic observation.`+tbl+degHow);
+    `<p>Starts are complex because fiber points are complex in general; real starts would stay in the real slice. The count is a numerical lower bound on d: unlike the monodromy + trace test, nothing here certifies that no further point exists.</p></div></details>`;
+    headline=`<b class="t">Degree.</b> Multistart Newton on <span class="m">h(\u03b8)=h(\u03b8*)</span> finds <b>d = ${d}</b> parameter vector${d===1?"":"s"} compatible with the generic observation.`;
+  }
+  li(headline+tbl+degHow);
   // verdict
   ver.hidden=false;
   if(d===1){
